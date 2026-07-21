@@ -35,7 +35,8 @@ class ChromaService:
         for chunk in chunks:
             doc_id = chunk["metadata"]["document_id"]
             chunk_idx = chunk["metadata"]["chunk_index"]
-            chunk_id = f"doc_{doc_id}_chunk_{chunk_idx}"
+            page_num = chunk["metadata"].get("page", 1)
+            chunk_id = f"doc_{doc_id}_page_{page_num}_chunk_{chunk_idx}"
             
             ids.append(chunk_id)
             documents.append(chunk["text"])
@@ -54,7 +55,7 @@ class ChromaService:
             # Generate embeddings in batch
             embeddings = self.model.encode(documents, show_progress_bar=False).tolist()
             
-            self.collection.add(
+            self.collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
                 documents=documents,
