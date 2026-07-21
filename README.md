@@ -1,4 +1,4 @@
-# Enterprise Agentic AI Knowledge Assistant
+# Enterprise Agentic AI Knowledge Assistants
 
 The **Enterprise Agentic AI Knowledge Assistant** is a production-grade, full-stack AI platform designed to index, query, analyze, and compare internal corporate PDF documentation. Powered by a multi-agent state graph orchestrated with **LangGraph**, it enables semantic retrieval, document summarization, side-by-side policy comparisons, and automatic citation mapping, backed by **FastAPI** on the backend and **Streamlit** on the frontend.
 
