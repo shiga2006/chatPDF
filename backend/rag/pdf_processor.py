@@ -1,7 +1,32 @@
 import fitz  # PyMuPDF
 from datetime import datetime
 from typing import List, Dict, Any
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except Exception:
+    class RecursiveCharacterTextSplitter:
+        def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, length_function=len):
+            self.chunk_size = chunk_size
+            self.chunk_overlap = chunk_overlap
+            self.length_function = length_function
+
+        def split_text(self, text: str) -> List[str]:
+            if not text:
+                return []
+
+            chunks = []
+            start = 0
+            text_length = self.length_function(text)
+
+            while start < text_length:
+                end = min(start + self.chunk_size, text_length)
+                chunks.append(text[start:end])
+                if end >= text_length:
+                    break
+                start = max(0, end - self.chunk_overlap)
+
+            return chunks
 
 def extract_and_chunk_pdf(filepath: str, document_id: int, filename: str, owner_id: int) -> List[Dict[str, Any]]:
     """
@@ -27,6 +52,7 @@ def extract_and_chunk_pdf(filepath: str, document_id: int, filename: str, owner_
     )
     
     chunks = []
+    global_chunk_index = 0
     
     for page_num in range(len(doc)):
         page = doc.load_page(page_num)
@@ -47,8 +73,10 @@ def extract_and_chunk_pdf(filepath: str, document_id: int, filename: str, owner_
                     "page": int(page_num + 1),  # 1-based index
                     "upload_timestamp": datetime.utcnow().isoformat(),
                     "owner_id": int(owner_id),
-                    "chunk_index": i
+                    "chunk_index": global_chunk_index,
+                    "page_chunk_index": i
                 }
             })
+            global_chunk_index += 1
             
     return chunks

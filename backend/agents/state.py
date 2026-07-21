@@ -7,6 +7,14 @@ class AgentState(TypedDict):
     user_id: int
     session_id: int
     selected_document_ids: Optional[List[int]]
+    normalized_query: str
+    selected_domain: str
+    selected_tools: List[str]
+    subtasks: List[str]
+    retrieval_attempts: int
+    verification_score: float
+    verification_notes: str
+    needs_reretrieval: bool
     
     # Routing parameter for supervisor
     next_agent: str
