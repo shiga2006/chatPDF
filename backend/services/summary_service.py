@@ -1,11 +1,54 @@
 import logging
 from typing import Optional, List
+import re
 from backend.vectorstore.chroma_service import chroma_service
 from backend.agents.llm_factory import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 logger = logging.getLogger(__name__)
+
+
+def _split_sentences(text: str) -> List[str]:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
+
+
+def _build_extractive_summary(full_text: str, summary_type: str, filename: str, page_number: Optional[int]) -> str:
+    cleaned_text = re.sub(r"\s+", " ", full_text).strip()
+    sentences = _split_sentences(cleaned_text)
+
+    if not sentences:
+        return f"No content found to summarize for {filename}."
+
+    if summary_type == "short":
+        selected = sentences[:2]
+        body = " ".join(selected)
+        return f"## Executive Summary\n\n{body}"
+
+    if summary_type == "bullet":
+        selected = sentences[:8]
+        bullet_lines = [f"- {sentence}" for sentence in selected]
+        return "## Key Points\n\n" + "\n".join(bullet_lines)
+
+    selected = sentences[:10]
+    sections = [
+        "## Overview",
+        "\n".join(f"- {sentence}" for sentence in selected[:4]),
+    ]
+
+    if len(selected) > 4:
+        sections.extend([
+            "\n## Additional Details",
+            "\n".join(f"- {sentence}" for sentence in selected[4:10]),
+        ])
+
+    summary = "\n\n".join(sections)
+
+    if page_number is not None:
+        summary += f"\n\n_Source: Page {page_number}_"
+
+    return summary
 
 def generate_document_summary(document_id: int, summary_type: str = "detailed", page_number: Optional[int] = None) -> str:
     """
@@ -77,15 +120,23 @@ def generate_document_summary(document_id: int, summary_type: str = "detailed", 
             ("user", "Document: {filename}\n\nContent:\n{content}")
         ])
         
-        llm = get_llm(temperature=0.2)
-        chain = prompt | llm | StrOutputParser()
-        
-        summary = chain.invoke({
-            "filename": filename,
-            "content": full_text
-        })
-        
-        return summary
+        try:
+            llm = get_llm(temperature=0.2)
+            chain = prompt | llm | StrOutputParser()
+
+            summary = chain.invoke({
+                "filename": filename,
+                "content": full_text
+            })
+
+            return summary
+        except Exception as llm_error:
+            logger.warning(
+                "LLM summary generation failed for document %s, using extractive fallback: %s",
+                document_id,
+                llm_error,
+            )
+            return _build_extractive_summary(full_text, summary_type, filename, page_number)
         
     except Exception as e:
         logger.error(f"Error generating document summary: {e}")

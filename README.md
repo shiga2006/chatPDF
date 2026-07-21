@@ -1,27 +1,31 @@
 # Enterprise Agentic AI Knowledge Assistant
 
-The **Enterprise Agentic AI Knowledge Assistant** is a production-grade, full-stack AI platform designed to index, query, analyze, and compare internal corporate PDF documentation. Powered by a multi-agent state graph orchestrated with **LangGraph**, it enables semantic retrieval, document summarization, side-by-side policy comparisons, and automatic citation mapping, backed by **FastAPI** on the backend and **Streamlit** on the frontend.
+The **Enterprise Agentic AI Knowledge Assistant** is a full-stack document intelligence app for uploaded PDFs. It combines a **FastAPI** backend, a **Streamlit** frontend, **LangGraph** routing, **ChromaDB** retrieval, and local or cloud LLMs to support semantic search, summaries, comparisons, citations, and document management.
 
 ---
 
 ## Architecture Diagram
 
-The application uses a multi-agent system built on **LangGraph**. A **Supervisor Agent** evaluates user queries and routes them to specialized agents. The state transitions logically, ensuring that citations are generated and verified before returning a response.
+The backend uses a LangGraph workflow with a memory rewrite stage, a routing/planning stage, specialized agents, citation generation, and verification before returning a final answer.
 
 ```mermaid
 graph TD
-    User([User Query]) --> MemoryNode[Conversation Memory Agent]
-    MemoryNode -->|Standalone Query| Supervisor{Supervisor Agent}
-    
-    Supervisor -->|Q&A / Fact Search| RetrievalAgent[Retrieval Agent]
-    Supervisor -->|Summarization| SummaryAgent[Summary Agent]
-    Supervisor -->|File Comparison| ComparisonAgent[Comparison Agent]
-    
-    RetrievalAgent --> CitationAgent[Citation Agent]
-    SummaryAgent --> CitationAgent
-    ComparisonAgent --> CitationAgent
-    
-    CitationAgent --> FinalAnswer([Final Response + Citations])
+   User([User Query]) --> MemoryNode[Memory Node]
+   MemoryNode --> Router[Domain Router]
+   Router --> Planner[Planner]
+   Planner --> Supervisor{Supervisor}
+
+   Supervisor -->|Retrieval| RetrievalAgent[Retrieval Agent]
+   Supervisor -->|Summary| SummaryAgent[Summary Agent]
+   Supervisor -->|Comparison| ComparisonAgent[Comparison Agent]
+
+   RetrievalAgent --> CitationAgent[Citation Agent]
+   SummaryAgent --> CitationAgent
+   ComparisonAgent --> CitationAgent
+
+   CitationAgent --> Verification[Verification Node]
+   Verification -->|High confidence| FinalAnswer([Final Answer])
+   Verification -->|Retry once| RetrievalAgent
 ```
 
 ---
@@ -29,52 +33,48 @@ graph TD
 ## Folder Structure
 
 ```
-chatPdf/
+chatPDF/
 ├── .streamlit/
-│   └── config.toml               # Streamlit UI theme configurations
+│   └── config.toml               # Streamlit UI theme configuration
 ├── backend/
 │   ├── api/
-│   │   └── routes.py             # FastAPI routes (Auth, Upload, Chat, Summary)
-│   ├── auth/
-│   │   └── security.py           # JWT generation, validation, and password hashing
-│   ├── database/
-│   │   └── connection.py         # SQLAlchemy connection pool and MySQL database creation
-│   ├── models/
-│   │   └── db_models.py          # SQLAlchemy models (User, Document, ChatSession, Chat)
-│   ├── schemas/
-│   │   └── api_schemas.py        # Pydantic validation schemas
-│   ├── services/
-│   │   └── summary_service.py    # Document text extraction and summarization logic
+│   │   └── routes.py             # REST endpoints for auth, documents, chat, summary, and preview
 │   ├── agents/
-│   │   ├── retriever/
-│   │   │   └── agent.py          # Retrieval Agent Node
-│   │   ├── summary/
-│   │   │   └── agent.py          # Summary Agent Node
-│   │   ├── comparison/
-│   │   │   └── agent.py          # Comparison Agent Node
-│   │   ├── citation/
-│   │   │   └── agent.py          # RAG text generation and Citation Agent Node
-│   │   ├── memory/
-│   │   │   └── agent.py          # Context Query Rewriter Agent Node
-│   │   ├── state.py              # LangGraph shared State definitions
-│   │   ├── llm_factory.py        # LLM client builder (Ollama / OpenAI)
-│   │   └── graph.py              # Master LangGraph compilation
+│   │   ├── graph.py              # LangGraph orchestration and routing
+│   │   ├── llm_factory.py        # LLM provider selection
+│   │   ├── state.py              # Shared graph state schema
+│   │   ├── memory/agent.py       # Query rewriting from chat history
+│   │   ├── retriever/agent.py    # ChromaDB retrieval
+│   │   ├── summary/agent.py      # Document summarization
+│   │   ├── comparison/agent.py   # Document comparison
+│   │   └── citation/agent.py     # Final answer + citation assembly
+│   ├── auth/
+│   │   └── security.py           # JWT auth and password hashing
+│   ├── database/
+│   │   └── connection.py         # SQLAlchemy engine and session setup
+│   ├── models/
+│   │   └── db_models.py          # User, document, and chat tables
 │   ├── rag/
-│   │   └── pdf_processor.py      # PDF text extractor and chunker (PyMuPDF)
+│   │   └── pdf_processor.py      # PDF extraction and chunking
+│   ├── schemas/
+│   │   └── api_schemas.py        # Pydantic request/response models
+│   ├── services/
+│   │   └── summary_service.py    # Summary generation logic
 │   ├── vectorstore/
-│   │   └── chroma_service.py     # ChromaDB wrapper (SentenceTransformers)
-│   └── config.py                 # Pydantic configuration loader
+│   │   └── chroma_service.py     # Persistent ChromaDB wrapper
+│   └── main.py                   # FastAPI app entrypoint
 ├── frontend/
-│   ├── views/
-│   │   ├── dashboard.py          # Streamlit metrics cards and analytics grid
-│   │   ├── documents.py          # Streamlit document manager, uploaders, and previews
-│   │   ├── chat.py               # Streamlit ChatGPT-like interface and citations expander
-│   │   └── settings.py           # Streamlit connection test dashboard
-│   ├── app.py                    # Streamlit entry point (auth, routing, navigation)
-│   └── utils.py                  # API client handlers and session handlers
-├── uploads/                      # Local PDF uploads folder (grouped by User ID)
-├── chromadb/                     # Local vector database storage folder
-├── .env                          # Configuration settings
+│   ├── app.py                    # Streamlit app entrypoint and navigation
+│   ├── utils.py                  # API client helpers
+│   └── views/
+│       ├── dashboard.py          # Metrics and analytics
+│       ├── documents.py          # Upload, preview, and document management
+│       ├── chat.py               # Chat workspace
+│       └── settings.py           # Connection/settings page
+├── chromadb/                     # Persistent vector store data
+├── uploads/                      # Uploaded PDFs by user ID
+├── chatpdf.db                    # SQLite fallback database used in local development
+├── .env                          # Local configuration settings
 ├── requirements.txt              # Project dependencies
 └── README.md                     # Platform documentation
 ```
@@ -83,23 +83,24 @@ chatPdf/
 
 ## Technology Stack
 
-- **Backend Framework**: FastAPI (Asynchronous endpoints)
-- **Frontend View**: Streamlit (Python-driven premium UI)
-- **Database (SQL)**: MySQL (using SQLAlchemy ORM and PyMySQL)
-- **Vector Database**: ChromaDB (Persistent client mode)
-- **Agentic Engine**: LangGraph & LangChain
-- **Embedding Model**: `sentence-transformers/all-MiniLM-L6-v2` (Local execution)
-- **Local Large Language Model**: Ollama (`llama3.2` or `llama3.1`)
-- **PDF Extraction**: PyMuPDF (fitz)
-- **Security**: JWT Authentication + Bcrypt hashing
+- **Backend Framework**: FastAPI
+- **Frontend**: Streamlit
+- **Agentic Engine**: LangGraph and LangChain
+- **Vector Database**: ChromaDB persistent client
+- **SQL Database**: MySQL in production, SQLite fallback for local development
+- **Embedding Model**: sentence-transformers `all-MiniLM-L6-v2`
+- **LLM Providers**: Ollama or OpenAI through a shared factory
+- **PDF Extraction**: PyMuPDF
+- **Security**: JWT authentication and bcrypt password hashing
 
 ---
 
 ## Installation & Setup
 
-### Prerequisite 1: MySQL Setup
-Ensure you have a MySQL server running locally. Create or verify a root database connection.
-Create a database named `chatpdf_db` or let the backend auto-create it using your configured credentials.
+### Prerequisite 1: Database Setup
+The app is configured for MySQL by default, but the backend falls back to the local `chatpdf.db` SQLite file when MySQL is unavailable.
+
+If you want the MySQL path, make sure a MySQL server is running and the credentials in `.env` match your database user.
 
 ### Prerequisite 2: Ollama Setup
 1. Download and install [Ollama](https://ollama.com).
@@ -112,15 +113,16 @@ Create a database named `chatpdf_db` or let the backend auto-create it using you
    ollama pull llama3.2
    ```
 
-### Step 3: Clone & Install Dependencies
-1. Place the project files inside your workspace.
-2. Install the python dependencies:
+If that model is not available locally, the backend now falls back to an extractive summary for document summaries.
+
+### Step 3: Install Dependencies
+Install the Python dependencies from the project root:
    ```bash
    pip install -r requirements.txt
    ```
 
 ### Step 4: Environment Variables (`.env`)
-Create a `.env` file in the root directory (based on `.env.example`):
+Create a `.env` file in the root directory:
 ```ini
 DATABASE_URL=mysql+pymysql://root:rootpassword@localhost:3306/chatpdf_db
 JWT_SECRET=supersecretjwtkeyforagenticassistant123!@#
@@ -136,16 +138,16 @@ UPLOAD_DIR=uploads
 ## How to Run
 
 ### 1. Launch FastAPI Backend Server
-Run uvicorn from the root directory:
+Run uvicorn from the project root:
 ```bash
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn --app-dir E:/debris/chatPDF backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-On startup, FastAPI will automatically connect to MySQL and create the required database tables.
+On startup, FastAPI connects to the configured SQL database, creates any missing tables, and serves the REST API on port 8000.
 
 ### 2. Launch Streamlit Frontend App
 In a separate terminal tab, run:
 ```bash
-streamlit run frontend/app.py
+streamlit run E:/debris/chatPDF/frontend/app.py
 ```
 This opens the web browser at `http://localhost:8501`.
 
@@ -154,15 +156,17 @@ This opens the web browser at `http://localhost:8501`.
 ## How Agentic AI, LangGraph, and RAG Work
 
 ### 1. Retrieval-Augmented Generation (RAG)
-When a PDF is uploaded, it is parsed page-by-page. The text is chunked into 1000-character blocks with a 200-character overlap. Each chunk is embedded using the `all-MiniLM-L6-v2` model and saved to a persistent ChromaDB database.
-When a user asks a question, the vector DB is searched to retrieve the top-K relevant chunks, which are then passed to the LLM as grounding context to answer the question, eliminating hallucinations.
+When a PDF is uploaded, it is parsed and chunked, then indexed into persistent ChromaDB with metadata for document, page, chunk, and owner.
+When a user asks a question, the retriever pulls the most relevant chunks and the citation layer formats the answer with source references.
 
 ### 2. LangGraph State Machine
-Using LangGraph, we define nodes as python functions and edges as conditional transitions.
-- **Query Rewriting (Memory Agent)**: Standardizes questions like *"tell me more"* based on context, translating them to search phrases.
-- **Supervisor Router**: Classifies the query using LLM/rules to route to the correct agent node.
-- **Specialized Agents**: Summarize, compare, or search.
-- **Citation Agent**: Parses the generated answers to ensure every claim maps to an original document and page number.
+The graph starts with a memory rewrite node, then a router and planner, and finally a supervisor that chooses the correct agent.
+- **Memory Node**: Rewrites follow-up questions into standalone queries.
+- **Domain Router**: Assigns a coarse domain such as HR, finance, IT, or product.
+- **Planner**: Splits multi-part retrieval questions into subtasks.
+- **Supervisor**: Chooses retrieval, summary, or comparison.
+- **Citation Node**: Converts the agent output into a final answer and citation list.
+- **Verification Node**: Scores grounding quality and retries retrieval once when confidence is low.
 
 ---
 
@@ -177,5 +181,5 @@ Using LangGraph, we define nodes as python functions and edges as conditional tr
 - **`DELETE /documents/{id}`**: Deletes a document and clears its chunks from ChromaDB.
 - **`POST /chat`**: Takes a user query and runs it through the LangGraph agent pipeline.
 - **`GET /history`**: Returns chat history messages grouped by session.
-- **`GET /summary/{id}`**: Generates an executive, short, or bulleted summary for the document.
+- **`GET /summary/{id}`**: Generates an executive, short, or bulleted summary for the document, with an extractive fallback when the configured LLM is unavailable.
 - **`GET /preview/{id}`**: Serves raw PDF bytes for frontend iframe rendering.

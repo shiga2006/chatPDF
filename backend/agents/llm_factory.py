@@ -22,11 +22,27 @@ def get_llm(temperature: float = 0.0) -> BaseChatModel:
                 temperature=temperature,
                 openai_api_key=settings.OPENAI_API_KEY
             )
-            
+
     # Default is Ollama
-    logger.info(f"Instantiating Ollama ChatModel at {settings.OLLAMA_HOST} with model: {settings.LLM_MODEL}")
-    return ChatOllama(
-        base_url=settings.OLLAMA_HOST,
-        model=settings.LLM_MODEL,
-        temperature=temperature
-    )
+    model_name = settings.LLM_MODEL or "llama3.2"
+    logger.info(f"Instantiating Ollama ChatModel at {settings.OLLAMA_HOST} with model: {model_name}")
+
+    try:
+        return ChatOllama(
+            base_url=settings.OLLAMA_HOST,
+            model=model_name,
+            temperature=temperature
+        )
+    except Exception as exc:
+        if settings.OPENAI_API_KEY:
+            logger.warning(f"Ollama model '{model_name}' is unavailable ({exc}); falling back to OpenAI.")
+            return ChatOpenAI(
+                model=model_name,
+                temperature=temperature,
+                openai_api_key=settings.OPENAI_API_KEY
+            )
+
+        raise RuntimeError(
+            f"LLM model '{model_name}' is not available locally and OPENAI_API_KEY is not configured. "
+            f"Pull the model with `ollama pull {model_name}` when network access is available, or set LLM_PROVIDER=openai."
+        ) from exc
