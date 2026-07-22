@@ -55,3 +55,20 @@ class Chat(Base):
     # Relationships
     user = relationship("User", back_populates="chats")
     session = relationship("ChatSession", back_populates="chats")
+
+
+class EvaluationReport(Base):
+    __tablename__ = "evaluation_reports"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    report_name = Column(String(255), nullable=False, default="Unnamed Report")
+    summary_json = Column(Text, nullable=False)  # JSON aggregate scores
+    samples_json = Column(Text, nullable=False)   # JSON per-sample scores
+    judge_model = Column(String(100), nullable=True)
+    embedding_model = Column(String(100), nullable=True)
+    dataset_size = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    user = relationship("User")

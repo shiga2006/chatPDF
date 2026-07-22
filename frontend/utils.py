@@ -173,3 +173,33 @@ def get_pdf_preview_bytes(doc_id: int) -> Optional[bytes]:
     if response.status_code == 200:
         return response.content
     return None
+
+
+# ── Evaluation API helpers ──
+
+def api_get(endpoint: str) -> Optional[Any]:
+    """Convenience GET request returning parsed JSON."""
+    response = api_request("GET", endpoint)
+    if response.status_code == 200:
+        try:
+            return response.json()
+        except Exception:
+            return None
+    return None
+
+
+def api_post(endpoint: str, json_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convenience POST request returning parsed JSON."""
+    response = api_request("POST", endpoint, json_data=json_data)
+    if response.status_code == 200:
+        try:
+            return response.json()
+        except Exception:
+            return None
+    return None
+
+
+def api_delete(endpoint: str) -> bool:
+    """Convenience DELETE request returning success boolean."""
+    response = api_request("DELETE", endpoint)
+    return response.status_code == 200

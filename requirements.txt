@@ -20,3 +20,6 @@ python-dotenv
 requests
 pydantic
 pydantic-settings
+ragas
+datasets
+pandas
