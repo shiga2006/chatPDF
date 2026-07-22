@@ -1,9 +1,10 @@
 import os
 import json
+import math
 import logging
 import shutil
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -14,7 +15,8 @@ from backend.models.db_models import User, Document, ChatSession, Chat
 from backend.schemas.api_schemas import (
     UserRegister, UserLogin, Token, DocumentResponse, DocumentRename,
     ChatSessionResponse, ChatMessageResponse, ChatRequest, ChatResponse, CitationSchema,
-    DashboardMetrics, RecentDocumentSchema, RecentQuestionSchema
+    DashboardMetrics, RecentDocumentSchema, RecentQuestionSchema,
+    EvaluationRequest, EvaluationResponse, EvaluationReportListItem, EvalSampleItem
 )
 from backend.auth.security import (
     get_current_user, hash_password, verify_password, create_access_token
@@ -24,6 +26,7 @@ from backend.vectorstore.chroma_service import chroma_service
 from backend.agents.graph import agent_graph
 from backend.agents.llm_factory import get_llm
 from backend.services.summary_service import generate_document_summary
+from backend.models.db_models import EvaluationReport
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -581,3 +584,220 @@ def preview_document(
         raise HTTPException(status_code=404, detail="Physical PDF file not found on server disk.")
         
     return FileResponse(doc.filepath, media_type="application/pdf", filename=doc.filename)
+
+
+# --- RAGAS EVALUATION ROUTES ---
+
+
+@router.post("/evaluate", response_model=EvaluationResponse)
+def run_evaluation_api(
+    eval_req: EvaluationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Run RAGAS evaluation on a set of question-answer-context-ground_truth samples.
+    Requires OPENAI_API_KEY to be set in the environment.
+    """
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OPENAI_API_KEY environment variable is not set. RAGAS evaluation requires an OpenAI key.",
+        )
+
+    # Convert Pydantic models to dicts
+    records = []
+    for s in eval_req.samples:
+        records.append({
+            "question": s.question,
+            "answer": s.answer,
+            "contexts": s.contexts,
+            "ground_truth": s.ground_truth,
+        })
+
+    try:
+        from datasets import Dataset
+        from ragas import evaluate as ragas_evaluate
+        from ragas import metrics as ragas_metrics
+
+        # Resolve metrics
+        metric_name_options = [
+            ["faithfulness"],
+            ["answer_relevancy", "answer_relevance"],
+            ["context_precision"],
+            ["context_recall"],
+        ]
+        metrics = []
+        for options in metric_name_options:
+            for name in options:
+                m = getattr(ragas_metrics, name, None)
+                if m is not None:
+                    metrics.append(m)
+                    break
+
+        # Build LLM and embeddings
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from ragas.llms import LangchainLLMWrapper
+        from ragas.embeddings import LangchainEmbeddingsWrapper
+
+        llm = LangchainLLMWrapper(ChatOpenAI(model=eval_req.judge_model, temperature=0.0))
+        embeddings = LangchainEmbeddingsWrapper(
+            OpenAIEmbeddings(model=eval_req.embedding_model)
+        )
+
+        dataset = Dataset.from_list(records)
+        result = ragas_evaluate(
+            dataset=dataset,
+            metrics=metrics,
+            llm=llm,
+            embeddings=embeddings,
+            raise_exceptions=False,
+        )
+
+        # Parse results
+        try:
+            frame = result.to_pandas()
+            per_sample = frame.to_dict(orient="records")
+        except Exception:
+            per_sample = getattr(result, "scores", [])
+
+        if not isinstance(per_sample, list):
+            per_sample = []
+
+        metric_names = [
+            "faithfulness",
+            "answer_relevancy",
+            "answer_relevance",
+            "context_precision",
+            "context_recall",
+        ]
+        summary = {"rows": len(per_sample)}
+        for metric_name in metric_names:
+            values = []
+            for row in per_sample:
+                value = row.get(metric_name)
+                if isinstance(value, (int, float)) and not (
+                    isinstance(value, float) and math.isnan(value)
+                ):
+                    values.append(float(value))
+            if values:
+                summary[metric_name] = round(sum(values) / len(values), 4)
+
+        def sanitize(v: Any) -> Any:
+            if isinstance(v, float) and math.isnan(v):
+                return None
+            if isinstance(v, dict):
+                return {k: sanitize(v) for k, v in v.items()}
+            if isinstance(v, list):
+                return [sanitize(x) for x in v]
+            return v
+
+        # Save to DB
+        report = EvaluationReport(
+            user_id=current_user.id,
+            report_name=eval_req.report_name,
+            summary_json=json.dumps(summary),
+            samples_json=json.dumps(sanitize(per_sample)),
+            judge_model=eval_req.judge_model,
+            embedding_model=eval_req.embedding_model,
+            dataset_size=len(records),
+        )
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+
+        return EvaluationResponse(
+            id=report.id,
+            report_name=report.report_name,
+            summary=summary,
+            dataset_size=report.dataset_size,
+            judge_model=report.judge_model,
+            embedding_model=report.embedding_model,
+            created_at=report.created_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"RAGAS evaluation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"RAGAS evaluation failed: {str(e)}",
+        )
+
+
+@router.get("/evaluate/reports", response_model=List[EvaluationReportListItem])
+def list_evaluation_reports(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all evaluation reports for the current user."""
+    reports = (
+        db.query(EvaluationReport)
+        .filter(EvaluationReport.user_id == current_user.id)
+        .order_by(EvaluationReport.created_at.desc())
+        .all()
+    )
+    return [
+        EvaluationReportListItem(
+            id=r.id,
+            report_name=r.report_name,
+            dataset_size=r.dataset_size,
+            created_at=r.created_at,
+        )
+        for r in reports
+    ]
+
+
+@router.get("/evaluate/reports/{report_id}")
+def get_evaluation_report(
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve a specific evaluation report with full details."""
+    report = (
+        db.query(EvaluationReport)
+        .filter(
+            EvaluationReport.id == report_id,
+            EvaluationReport.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Evaluation report not found.")
+
+    return {
+        "id": report.id,
+        "report_name": report.report_name,
+        "summary": json.loads(report.summary_json),
+        "samples": json.loads(report.samples_json),
+        "judge_model": report.judge_model,
+        "embedding_model": report.embedding_model,
+        "dataset_size": report.dataset_size,
+        "created_at": report.created_at.isoformat(),
+    }
+
+
+@router.delete("/evaluate/reports/{report_id}")
+def delete_evaluation_report(
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete an evaluation report."""
+    report = (
+        db.query(EvaluationReport)
+        .filter(
+            EvaluationReport.id == report_id,
+            EvaluationReport.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Evaluation report not found.")
+
+    db.delete(report)
+    db.commit()
+    return {"message": f"Evaluation report '{report.report_name}' deleted."}

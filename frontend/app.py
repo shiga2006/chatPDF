@@ -4,6 +4,7 @@ from frontend.views.dashboard import show_dashboard
 from frontend.views.documents import show_documents
 from frontend.views.chat import show_chat
 from frontend.views.settings import show_settings
+from frontend.views.evaluation import show_evaluation
 
 # 1. Config page settings
 st.set_page_config(
@@ -111,7 +112,7 @@ else:
     # --- NAVIGATION BUTTONS ---
     nav_selection = st.sidebar.radio(
         "Navigation",
-        options=["Dashboard", "Documents Manager", "Chat Workspace", "System Settings"],
+        options=["Dashboard", "Documents Manager", "Chat Workspace", "Evaluation Lab", "System Settings"],
         label_visibility="collapsed"
     )
     
@@ -127,6 +128,8 @@ else:
         show_documents()
     elif st.session_state.current_page == "Chat Workspace":
         show_chat()
+    elif st.session_state.current_page == "Evaluation Lab":
+        show_evaluation()
     elif st.session_state.current_page == "System Settings":
         show_settings()
         

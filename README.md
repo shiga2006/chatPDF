@@ -183,3 +183,80 @@ The graph starts with a memory rewrite node, then a router and planner, and fina
 - **`GET /history`**: Returns chat history messages grouped by session.
 - **`GET /summary/{id}`**: Generates an executive, short, or bulleted summary for the document, with an extractive fallback when the configured LLM is unavailable.
 - **`GET /preview/{id}`**: Serves raw PDF bytes for frontend iframe rendering.
+
+---
+
+## RAGAS Evaluation System
+
+The project includes a **RAGAS (Retrieval-Augmented Generation Assessment)** evaluation system for benchmarking the quality of RAG outputs. It measures four key metrics:
+
+| Metric | Description |
+|--------|-------------|
+| **Faithfulness** | How factually consistent the answer is with the retrieved context |
+| **Answer Relevancy** | How relevant the generated answer is to the question |
+| **Context Precision** | How relevant the retrieved context chunks are to the question |
+| **Context Recall** | Whether all necessary context for answering the question was retrieved |
+
+### CLI Usage
+
+```bash
+# Basic evaluation with the sample dataset
+python evaluation/ragas_eval.py
+
+# Custom input file
+python evaluation/ragas_eval.py --input evaluation/sample_eval_dataset.jsonl
+
+# Export as Markdown or HTML report
+python evaluation/ragas_eval.py --format markdown --verbose
+python evaluation/ragas_eval.py --format html
+
+# Use different judge/embedding models
+python evaluation/ragas_eval.py --judge-model gpt-4o --embedding-model text-embedding-3-large
+
+# Quick runner (with interactive mode)
+python evaluation/run_eval.py
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/evaluate` | Run RAGAS evaluation on a set of question-answer-context-ground_truth samples |
+| `GET` | `/evaluate/reports` | List all evaluation reports for the current user |
+| `GET` | `/evaluate/reports/{id}` | Retrieve a specific evaluation report with full details |
+| `DELETE` | `/evaluate/reports/{id}` | Delete an evaluation report |
+
+### Dataset Format
+
+The evaluation dataset uses JSONL (one JSON object per line) with the following schema:
+
+```json
+{
+  "question": "What is the leave carry-forward limit?",
+  "answer": "Employees can carry forward up to 10 leave days.",
+  "contexts": [
+    "Section 4.2: Unused paid leave may be carried forward, capped at 10 days per year.",
+    "Section 4.3: Carried-forward leave expires after March 31."
+  ],
+  "ground_truth": "Employees may carry forward a maximum of 10 unused leave days to the next year."
+}
+```
+
+The sample dataset includes 14 benchmark questions across HR, IT, Finance, and Legal domains.
+
+### Frontend Evaluation Lab
+
+A new **Evaluation Lab** page in the Streamlit frontend allows you to:
+
+1. **Run evaluations** — paste JSONL, upload a file, or use the sample dataset
+2. **View past reports** — browse, view detailed per-sample scores, and delete reports
+3. **Configure models** — choose the judge LLM (e.g., `gpt-4o-mini`, `gpt-4o`) and embedding model
+
+### Requirements
+
+The following dependencies are already in `requirements.txt`:
+- `ragas` — RAGAS evaluation framework
+- `datasets` — HuggingFace Datasets for data loading
+- `pandas` — Data manipulation for score aggregation
+
+An **OpenAI API key** (`OPENAI_API_KEY`) must be set in the environment for the judge LLM and embeddings used during evaluation.

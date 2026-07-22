@@ -89,3 +89,39 @@ class DashboardMetrics(BaseModel):
     recent_documents: List[RecentDocumentSchema]
     recent_questions: List[RecentQuestionSchema]
     storage_used_mb: float
+
+
+# Evaluation Schemas
+class EvalSampleItem(BaseModel):
+    question: str
+    answer: str
+    contexts: List[str]
+    ground_truth: str
+
+class EvaluationRequest(BaseModel):
+    """Inline evaluation request (alternative to file upload)."""
+    report_name: str = "Unnamed Report"
+    samples: List[EvalSampleItem] = Field(..., min_length=1)
+    judge_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
+
+class EvaluationResponse(BaseModel):
+    id: int
+    report_name: str
+    summary: dict
+    dataset_size: int
+    judge_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class EvaluationReportListItem(BaseModel):
+    id: int
+    report_name: str
+    dataset_size: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
