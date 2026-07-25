@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+# Add project root (chatPDF/) to sys.path so that 'frontend' package is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 from frontend.utils import login_user, register_user
 from frontend.views.dashboard import show_dashboard
