@@ -1,27 +1,30 @@
 # Implementation Plan: K-Means Clustering + MCP Tool Routing
 
-## Done
-- [x] Analyzed existing codebase structure
-- [x] Verified dependencies: scikit-learn, mcp, fastmcp, sentence-transformers available
+## Complete ✅
 
-## Step 1: K-Means Clustering Module ✅
-- [x] Create `backend/agents/clustering/__init__.py`
-- [x] Create `backend/agents/clustering/embedding_cluster.py` - Query & document chunk clustering
+### Part 1: K-Means Clustering Module
+- [x] `backend/agents/clustering/__init__.py` - Exports EmbeddingCluster, cluster_manager
+- [x] `backend/agents/clustering/embedding_cluster.py` - Full K-Means clustering with:
+  - Query Intent Clustering (predict, predict_with_confidence)
+  - Document Chunk Clustering (diversify_retrieval for MMR-style)
+  - Incremental fitting, persistence (pickle), auto silhouette scoring
+  - Singleton `cluster_manager` with 7 intent clusters
 
-## Step 2: MCP Tool Routing Module ✅
-- [x] Create `backend/agents/mcp_routing/__init__.py`
-- [x] Create `backend/agents/mcp_routing/agent_tools.py` - MCP Tool definitions
-- [x] Create `backend/agents/mcp_routing/tool_router.py` - MCP-based tool clustering router
+### Part 2: MCP Tool Routing Module
+- [x] `backend/agents/mcp_routing/__init__.py` - Exports all MCP routing classes
+- [x] `backend/agents/mcp_routing/agent_tools.py` - AgentTool dataclass + AgentToolRegistry with 5 tool definitions
+- [x] `backend/agents/mcp_routing/tool_router.py` - MCPToolRouter with two-stage K-Means routing
 
-## Step 3: Integrate into LangGraph ⬜
-- [ ] Update `backend/agents/state.py` - Add cluster state fields
-- [ ] Update `backend/agents/graph.py` - Replace routing with cluster+MCP enhanced routing
-- [ ] Update `backend/api/routes.py` - Ensure MCP server lifecycle management
+### Part 3: LangGraph Integration
+- [x] `backend/agents/state.py` - 6 new cluster state fields added
+- [x] `backend/agents/graph.py` - Multi-tier routing: keyword overrides → MCP clustering → K-Means intent → LLM fallback
+- [x] `backend/api/routes.py` - initial_state updated with clustering fields + syntax fixes applied
 
-## Step 4: Update Dependencies ⬜
-- [ ] Update `requirements.txt` - Add scikit-learn if not present
+### Part 4: Dependencies
+- [x] `requirements.txt` - Added `scikit-learn`
 
-## Step 5: Testing ⬜
-- [ ] Create test script to validate clustering works
-- [ ] Verify MCP tool definitions are valid
-
+### Part 5: Bug Fixes Applied
+- [x] Fixed missing `except` clause in graph.py K-Means try block
+- [x] Fixed misindented `except` in LLM fallback block
+- [x] Fixed corrupted `initial_state` dict in routes.py
+- [x] All 8 Python files pass `py_compile.compile()` syntax check

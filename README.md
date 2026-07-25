@@ -48,12 +48,14 @@ chatPDF/
 │   │   ├── summary/agent.py      # Document summarization
 │   │   ├── comparison/agent.py   # Document comparison
 │   │   └── citation/agent.py     # Final answer + citation assembly
+│   │   ├── clustering/           # K-Means query intent clustering module
+│   │   └── mcp_routing/          # MCP tool definitions and routing
 │   ├── auth/
 │   │   └── security.py           # JWT auth and password hashing
 │   ├── database/
 │   │   └── connection.py         # SQLAlchemy engine and session setup
 │   ├── models/
-│   │   └── db_models.py          # User, document, and chat tables
+│   │   └── db_models.py          # User, document, chat, and evaluation report tables
 │   ├── rag/
 │   │   └── pdf_processor.py      # PDF extraction and chunking
 │   ├── schemas/
@@ -63,6 +65,11 @@ chatPDF/
 │   ├── vectorstore/
 │   │   └── chroma_service.py     # Persistent ChromaDB wrapper
 │   └── main.py                   # FastAPI app entrypoint
+├── evaluation/
+│   ├── ragas_eval.py             # RAGAS evaluation CLI
+│   ├── run_eval.py               # Interactive evaluation runner
+│   ├── sample_eval_dataset.jsonl # 14 benchmark Q&A samples
+│   └── reports/                  # Generated evaluation reports
 ├── frontend/
 │   ├── app.py                    # Streamlit app entrypoint and navigation
 │   ├── utils.py                  # API client helpers
@@ -70,6 +77,7 @@ chatPDF/
 │       ├── dashboard.py          # Metrics and analytics
 │       ├── documents.py          # Upload, preview, and document management
 │       ├── chat.py               # Chat workspace
+│       ├── evaluation.py         # RAGAS Evaluation Lab page
 │       └── settings.py           # Connection/settings page
 ├── chromadb/                     # Persistent vector store data
 ├── uploads/                      # Uploaded PDFs by user ID
@@ -92,6 +100,9 @@ chatPDF/
 - **LLM Providers**: Ollama or OpenAI through a shared factory
 - **PDF Extraction**: PyMuPDF
 - **Security**: JWT authentication and bcrypt password hashing
+- **Clustering**: scikit-learn KMeans / MiniBatchKMeans (7 query intent clusters: policy, factual, procedural, numeric, comparison, summarization, definitional)
+- **MCP Tool Routing**: Semantic K-Means clustering over AgentTool definitions for intelligent agent capability routing
+- **Evaluation**: RAGAS (Faithfulness, Answer Relevancy, Context Precision, Context Recall) with CLI + API + Streamlit frontend
 
 ---
 
@@ -164,7 +175,11 @@ The graph starts with a memory rewrite node, then a router and planner, and fina
 - **Memory Node**: Rewrites follow-up questions into standalone queries.
 - **Domain Router**: Assigns a coarse domain such as HR, finance, IT, or product.
 - **Planner**: Splits multi-part retrieval questions into subtasks.
-- **Supervisor**: Chooses retrieval, summary, or comparison.
+- **Supervisor**: Chooses retrieval, summary, or comparison via a 4-tier routing pipeline:
+  1. **Keyword overrides** — direct route for "compare" / "summarize" queries
+  2. **MCP cluster routing** — semantic tool similarity matching via K-Means
+  3. **K-Means intent routing** — detects comparison/summarization vs retrieval
+  4. **LLM fallback** — lowest priority, used when confidence is low
 - **Citation Node**: Converts the agent output into a final answer and citation list.
 - **Verification Node**: Scores grounding quality and retries retrieval once when confidence is low.
 
@@ -183,6 +198,54 @@ The graph starts with a memory rewrite node, then a router and planner, and fina
 - **`GET /history`**: Returns chat history messages grouped by session.
 - **`GET /summary/{id}`**: Generates an executive, short, or bulleted summary for the document, with an extractive fallback when the configured LLM is unavailable.
 - **`GET /preview/{id}`**: Serves raw PDF bytes for frontend iframe rendering.
+
+---
+
+## K-Means Clustering Module
+
+**Location**: `backend/agents/clustering/embedding_cluster.py`
+
+The `EmbeddingCluster` class uses `sentence-transformers` + `sklearn.cluster.KMeans` to group user queries and document chunks into 7 semantic intent clusters:
+
+| Cluster ID | Label | Example |
+|-----------|-------|---------|
+| 0 | `policy_search` | "What is the leave policy?" |
+| 1 | `factual_qa` | "Who is the IT support contact?" |
+| 2 | `procedural_howto` | "How do I apply for leave?" |
+| 3 | `numeric_analytics` | "What is the budget limit?" |
+| 4 | `comparison` | "Compare the benefits package" |
+| 5 | `summarization` | "Summarize this document" |
+| 6 | `definitional` | "What is a reimbursement?" |
+
+**Key features**:
+- `fit()` / `incremental_fit()` — train and update clusters incrementally
+- `predict_with_confidence()` — returns cluster ID + confidence score
+- `diversify_retrieval()` — MMR-style topic diversification for document chunks
+- `_auto_determine_clusters()` — silhouette score for optimal k
+- Persistence via pickle to `chromadb/cluster_model.pkl`
+
+---
+
+## MCP Tool Routing Module
+
+**Location**: `backend/agents/mcp_routing/`
+
+Defines 5 agent capabilities as `AgentTool` objects in a registry, then uses K-Means to cluster tools by capability similarity for intelligent routing.
+
+**Registered Tools**:
+| Tool | Category | Description |
+|------|----------|-------------|
+| `retrieve_semantic` | retrieval | Semantic vector search across documents |
+| `summarize_comprehensive` | summary | Generate document summaries |
+| `compare_documents` | comparison | Side-by-side comparison of documents |
+| `cite_sources` | citation | Format citations with source metadata |
+| `verify_answer` | verification | Score grounding quality of answers |
+
+**Routing Pipeline**:
+1. Tools are clustered by description via K-Means
+2. User query is embedded and mapped to the nearest tool cluster centroid
+3. Best tool within the matched cluster is selected based on confidence threshold
+4. Falls back to keyword matching when confidence is low
 
 ---
 
@@ -246,7 +309,7 @@ The sample dataset includes 14 benchmark questions across HR, IT, Finance, and L
 
 ### Frontend Evaluation Lab
 
-A new **Evaluation Lab** page in the Streamlit frontend allows you to:
+The **Evaluation Lab** page in the Streamlit frontend allows you to:
 
 1. **Run evaluations** — paste JSONL, upload a file, or use the sample dataset
 2. **View past reports** — browse, view detailed per-sample scores, and delete reports

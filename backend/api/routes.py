@@ -435,7 +435,7 @@ def run_chat(
         
     # Add current question
     messages.append(HumanMessage(content=chat_req.question))
-    
+
     # Prepare initial LangGraph state
     initial_state = {
         "messages": messages,
@@ -456,7 +456,13 @@ def run_chat(
         "summary_result": "",
         "comparison_result": "",
         "citations": [],
-        "final_answer": ""
+        "final_answer": "",
+        "query_intent_cluster": -1,
+        "query_intent_label": "",
+        "query_intent_confidence": 0.0,
+        "mcp_routing_decision": "",
+        "mcp_routing_confidence": 0.0,
+        "cluster_diversified_context": [],
     }
     
     try:
