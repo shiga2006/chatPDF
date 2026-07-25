@@ -26,3 +26,11 @@ class AgentState(TypedDict):
     comparison_result: str
     citations: List[Dict[str, Any]]
     final_answer: str
+
+    # --- K-Means & MCP Clustering fields ---
+    query_intent_cluster: int           # K-Means cluster ID for query intent
+    query_intent_label: str             # Human-readable cluster label
+    query_intent_confidence: float      # Confidence of cluster assignment
+    mcp_routing_decision: str           # MCP tool routing decision (category)
+    mcp_routing_confidence: float       # MCP routing confidence score
+    cluster_diversified_context: List[Dict[str, Any]]  # Diversity-ranked chunks
