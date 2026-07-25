@@ -1,4 +1,4 @@
-# Enterprise Agentic AI Knowledge Assistant !
+# Enterprise Agentic AI Knowledge Assistant 
 
 The **Enterprise Agentic AI Knowledge Assistant** is a full-stack document intelligence app for uploaded PDFs. It combines a **FastAPI** backend, a **Streamlit** frontend, **LangGraph** routing, **ChromaDB** retrieval, and local or cloud LLMs to support semantic search, summaries, comparisons, citations, and document management.
 
