@@ -8,9 +8,78 @@ from backend.agents.retriever.agent import retrieval_agent
 from backend.agents.summary.agent import summary_agent
 from backend.agents.comparison.agent import comparison_agent
 from backend.agents.citation.agent import citation_agent
+
+# K-Means & MCP imports
+from backend.agents.clustering import cluster_manager
+from backend.agents.mcp_routing import mcp_tool_router
+
 from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
+
+# -------------------- Train K-Means cluster_manager on example queries --------------------
+
+_EXAMPLE_QUERIES = [
+    # Policy search (cluster 0)
+    "What is the leave policy?",
+    "What are the benefits for employees?",
+    "What is the vacation policy?",
+    "Show me the payroll guidelines",
+    "What is the HR policy on remote work?",
+    # Factual QA (cluster 1)
+    "Who is the point of contact for IT support?",
+    "What is the product launch date?",
+    "When was this document published?",
+    "Tell me about the company holidays",
+    "How many vacation days do I get?",
+    # Procedural (cluster 2)
+    "How do I apply for leave?",
+    "How to reset my password?",
+    "What is the process for reimbursement?",
+    "How to request access to the system",
+    "Steps to submit an invoice",
+    # Numeric/analytics (cluster 3)
+    "What is the budget limit?",
+    "How much is the expense cap?",
+    "What are the tax deductions?",
+    "What is the cost of the project?",
+    "How many days of sick leave?",
+    # Comparison (cluster 4)
+    "Compare the benefits package",
+    "What is the difference between plan A and B?",
+    "How does this policy compare to last year?",
+    "Compare IT and HR policies",
+    "Versus the old policy, what changed?",
+    # Summarization (cluster 5)
+    "Summarize this document",
+    "Give me an overview of the policy",
+    "Bullet points of the key takeaways",
+    "Executive summary of the report",
+    "Brief summary of the product specs",
+    # Definitional (cluster 6)
+    "What is a reimbursement?",
+    "Define the term deductible",
+    "Explain what carry-forward means",
+    "What does FMLA stand for?",
+    "What is the meaning of vesting period?",
+]
+
+# Train cluster_manager on examples (non-blocking)
+try:
+    cluster_manager.incremental_fit(_EXAMPLE_QUERIES)
+    logger.info("K-Means cluster_manager trained on %d example queries.", len(_EXAMPLE_QUERIES))
+except Exception as e:
+    logger.warning("Could not train cluster_manager initially: %s", e)
+
+# Ensure MCP tool router is fitted
+if not mcp_tool_router.is_trained:
+    try:
+        mcp_tool_router.fit_tool_clusters()
+        logger.info("MCP tool router fitted on agent tools.")
+    except Exception as e:
+        logger.warning("Could not fit MCP tool router: %s", e)
+
+# -------------------- End of training block --------------------
 
 DOMAIN_KEYWORDS = {
     "hr": ["hr", "benefit", "benefits", "leave", "policy", "employee", "payroll", "holiday", "vacation"],
@@ -20,10 +89,37 @@ DOMAIN_KEYWORDS = {
 }
 
 def _select_domain(query: str) -> str:
+    """
+    Selects document domain using a combination of:
+    1. K-Means cluster prediction (if trained, confidence > 0.4)
+    2. Keyword-based fallback
+    """
     query_lower = query.lower()
+
+    # Try K-Means cluster-based selection first
+    if cluster_manager.is_trained:
+        cluster_id, confidence = cluster_manager.predict_with_confidence(query)
+        if confidence > 0.4:
+            cluster_label = cluster_manager.get_cluster_label(cluster_id)
+            cluster_to_domain = {
+                "policy_search": "hr",
+                "factual_qa": "general",
+                "procedural_howto": "it",
+                "numeric_analytics": "finance",
+                "comparison": "general",
+                "summarization": "general",
+                "definitional": "general",
+            }
+            domain = cluster_to_domain.get(cluster_label, "general")
+            logger.info(
+                "Cluster-based domain: cluster=%s (id=%d, conf=%.3f) -> domain=%s",
+                cluster_label, cluster_id, confidence, domain
+            )
+            return domain
+
+    # Fallback: keyword-based
     best_domain = "general"
     best_score = 0
-
     for domain, keywords in DOMAIN_KEYWORDS.items():
         score = sum(1 for keyword in keywords if keyword in query_lower)
         if score > best_score:
@@ -62,23 +158,56 @@ def memory_node(state: AgentState) -> dict:
 
 def coarse_router_node(state: AgentState) -> dict:
     """
-    Stage 3a: Coarse domain routing.
-    Chooses a broad document domain and classifies the request shape.
+    Stage 3a: Enhanced coarse domain + intent routing.
+    Uses K-Means clustering (if available) to determine domain and
+    request type, with keyword-based fallback.
     """
     query = state.get("query", "")
     domain = _select_domain(query)
     query_lower = query.lower()
 
+    # Classify request type with K-Means enhancement
     if any(k in query_lower for k in ["compare", "comparison", "versus", " vs ", "difference", "similarities"]):
         route_class = "comparison"
     elif any(k in query_lower for k in ["summarize", "summary", "overview", "bullet points", "executive summary"]):
         route_class = "summary"
+    elif cluster_manager.is_trained:
+        # Use K-Means to classify intent
+        cluster_id, confidence = cluster_manager.predict_with_confidence(query)
+        if confidence > 0.45:
+            cluster_label = cluster_manager.get_cluster_label(cluster_id)
+            if cluster_label == "comparison":
+                route_class = "comparison"
+            elif cluster_label == "summarization":
+                route_class = "summary"
+            else:
+                route_class = "retrieval"
+            logger.info(
+                "K-Means intent classification: cluster=%s (id=%d, conf=%.3f) -> %s",
+                cluster_label, cluster_id, confidence, route_class
+            )
+        else:
+            route_class = "retrieval"
     else:
         route_class = "retrieval"
 
+    # Record K-Means cluster info in state
+    cluster_id = -1
+    cluster_label = ""
+    cluster_confidence = 0.0
+    if cluster_manager.is_trained:
+        try:
+            cluster_id, cluster_confidence = cluster_manager.predict_with_confidence(query)
+            cluster_label = cluster_manager.get_cluster_label(cluster_id)
+        except Exception:
+            pass
+
     return {
         "selected_domain": domain,
-        "next_agent": route_class
+        "next_agent": route_class,
+        "query_intent_cluster": cluster_id,
+        "query_intent_label": cluster_label,
+        "query_intent_confidence": cluster_confidence,
     }
 
 def planner_node(state: AgentState) -> dict:
