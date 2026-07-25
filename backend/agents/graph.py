@@ -321,29 +321,28 @@ def supervisor_node(state: AgentState) -> dict:
         except Exception:
             pass
 
-    # --- LLM Classification (final fallback) ---
-    logger.info("Falling back to LLM-based supervisor classification...")
-            "You are the Supervisor Agent for an enterprise document knowledge assistant.\n"
-            f"Analyze the user query: \"{query}\"\n\n"
-            "Decide which of the following agents is best suited to answer it:\n"
-            "- 'summary_agent': if the user explicitly wants a summary, recap, list of bullet points from a document or specific pages.\n"
-            "- 'comparison_agent': if the user wants to compare multiple documents, find differences, similarities, or contrast rules.\n"
-            "- 'retrieval_agent': for all other standard fact-finding, search, and informational questions about document contents.\n\n"
-            "Respond ONLY with the name of the agent ('summary_agent', 'comparison_agent', or 'retrieval_agent') and nothing else. No punctuation."
-        )
-        try:
-            llm = get_llm(temperature=0.0)
-            response = llm.invoke([HumanMessage(content=prompt)])
-            next_agent = response.content.strip().lower()
-            
-            # Clean up the output
-            if "summary" in next_agent:
-                next_agent = "summary_agent"
-            elif "comparison" in next_agent or "compare" in next_agent:
-                next_agent = "comparison_agent"
-            else:
-                next_agent = "retrieval_agent"
-        except Exception as e:
+    prompt = (
+        "You are the Supervisor Agent for an enterprise document knowledge assistant.\n"
+        f"Analyze the user query: \"{query}\"\n\n"
+        "Decide which of the following agents is best suited to answer it:\n"
+        "- 'summary_agent': if the user explicitly wants a summary, recap, list of bullet points from a document or specific pages.\n"
+        "- 'comparison_agent': if the user wants to compare multiple documents, find differences, similarities, or contrast rules.\n"
+        "- 'retrieval_agent': for all other standard fact-finding, search, and informational questions about document contents.\n\n"
+        "Respond ONLY with the name of the agent ('summary_agent', 'comparison_agent', or 'retrieval_agent') and nothing else. No punctuation."
+    )
+    try:
+        llm = get_llm(temperature=0.0)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        next_agent = response.content.strip().lower()
+        
+        # Clean up the output
+        if "summary" in next_agent:
+            next_agent = "summary_agent"
+        elif "comparison" in next_agent or "compare" in next_agent:
+            next_agent = "comparison_agent"
+        else:
+            next_agent = "retrieval_agent"
+    except Exception as e:
             logger.error(f"Supervisor classification error: {e}. Defaulting to retrieval_agent.")
             next_agent = "retrieval_agent"
             
