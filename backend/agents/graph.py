@@ -243,14 +243,86 @@ def supervisor_node(state: AgentState) -> dict:
     subtasks = state.get("subtasks", [])
     query_lower = query.lower()
     
-    # Rule-based fast paths
+    # --- Fast keyword overrides (highest priority) ---
     if any(k in query_lower for k in ["compare", "comparison", "versus", " vs ", "difference", "similarities"]):
         next_agent = "comparison_agent"
-    elif any(k in query_lower for k in ["summarize", "summary", "overview", "bullet points", "executive summary"]):
+        logger.info("Keyword override -> %s", next_agent)
+        return {
+            "next_agent": next_agent,
+            "selected_tools": state.get("selected_tools", []),
+            "mcp_routing_decision": "comparison",
+            "mcp_routing_confidence": 1.0,
+        }
+    if any(k in query_lower for k in ["summarize", "summary", "overview", "bullet points", "executive summary"]):
         next_agent = "summary_agent"
-    else:
-        # LLM classification
-        prompt = (
+        logger.info("Keyword override -> %s", next_agent)
+        return {
+            "next_agent": next_agent,
+            "selected_tools": state.get("selected_tools", []),
+            "mcp_routing_decision": "summary",
+            "mcp_routing_confidence": 1.0,
+        }
+
+    # --- MCP Clustering Routing ---
+    try:
+        mcp_decision = mcp_tool_router.route_query(query)
+        mcp_confidence = mcp_decision.confidence
+        mcp_category = mcp_decision.category
+
+        logger.info(
+            "MCP cluster routing: category=%s, tool=%s, confidence=%.3f, fallback=%s",
+            mcp_category, mcp_decision.tool_name, mcp_confidence, mcp_decision.is_fallback
+        )
+
+        category_to_agent = {
+            "retrieval": "retrieval_agent",
+            "summary": "summary_agent",
+            "comparison": "comparison_agent",
+            "citation": "citation_agent",
+            "memory": "memory_node",
+            "verification": "verification_node",
+        }
+
+        if mcp_confidence >= 0.35 and not mcp_decision.is_fallback:
+            next_agent = category_to_agent.get(mcp_category, "retrieval_agent")
+            logger.info("MCP cluster routing -> %s (conf=%.3f)", next_agent, mcp_confidence)
+            return {
+                "next_agent": next_agent,
+                "selected_tools": state.get("selected_tools", []),
+                "mcp_routing_decision": mcp_category,
+                "mcp_routing_confidence": mcp_confidence,
+            }
+    except Exception as exc:
+        logger.warning("MCP routing error (falling through): %s", exc)
+
+    # --- K-Means Query Intent Routing ---
+    if cluster_manager.is_trained:
+        try:
+            cluster_id, cluster_confidence = cluster_manager.predict_with_confidence(query)
+            cluster_label = cluster_manager.get_cluster_label(cluster_id)
+            logger.info(
+                "K-Means intent: cluster=%s (id=%d, conf=%.3f)",
+                cluster_label, cluster_id, cluster_confidence
+            )
+
+            if cluster_confidence > 0.5:
+                intent_to_agent = {
+                    "comparison": "comparison_agent",
+                    "summarization": "summary_agent",
+                }
+                next_agent = intent_to_agent.get(cluster_label, "retrieval_agent")
+                logger.info("K-Means intent routing -> %s", next_agent)
+                return {
+                    "next_agent": next_agent,
+                    "selected_tools": state.get("selected_tools", []),
+                    "mcp_routing_decision": next_agent.replace("_agent", ""),
+                    "mcp_routing_confidence": cluster_confidence,
+                }
+        except Exception:
+            pass
+
+    # --- LLM Classification (final fallback) ---
+    logger.info("Falling back to LLM-based supervisor classification...")
             "You are the Supervisor Agent for an enterprise document knowledge assistant.\n"
             f"Analyze the user query: \"{query}\"\n\n"
             "Decide which of the following agents is best suited to answer it:\n"
